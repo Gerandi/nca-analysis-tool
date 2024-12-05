@@ -17,6 +17,103 @@ from utils.session_state import (
     validate_analysis_settings
 )
 
+def render_results(results: Dict[str, Any]) -> None:
+    """Render analysis results."""
+    st.header("Analysis Results")
+    
+    # Display main plot
+    fig = go.Figure()
+    
+    # Get data from session state
+    processed_data = st.session_state.processed_data
+    x = processed_data[st.session_state.x_var].values
+    y = processed_data[st.session_state.y_var].values
+    
+    # Add scatter plot
+    fig.add_trace(go.Scatter(
+        x=x,
+        y=y,
+        mode='markers',
+        name='Data Points',
+        marker=dict(
+            size=8,
+            color='blue',
+            opacity=0.6
+        )
+    ))
+    
+    # Add ceiling line
+    sort_idx = np.argsort(x)
+    fig.add_trace(go.Scatter(
+        x=x[sort_idx],
+        y=results['ceiling_line'][sort_idx],
+        mode='lines',
+        name='Ceiling Line',
+        line=dict(color='red', width=2)
+    ))
+    
+    fig.update_layout(
+        title="NCA Results",
+        xaxis_title=st.session_state.x_var,
+        yaxis_title=st.session_state.y_var,
+        height=500,
+        template='plotly_white'
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # Display key metrics
+    st.subheader("Key Metrics")
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            "Effect Size",
+            f"{results['effect_size']:.3f}",
+            help="NCA effect size (0-1)"
+        )
+    
+    with col2:
+        st.metric(
+            "Points Below Ceiling",
+            f"{results['effect_stats']['points_below_ceiling']}",
+            help="Number of points below the ceiling line"
+        )
+    
+    with col3:
+        st.metric(
+            "Model Fit (R²)",
+            f"{1 - results['statistical_tests']['residual_std']**2:.3f}",
+            help="Goodness of fit measure"
+        )
+    
+    # Statistical Tests
+    if results.get('statistical_tests'):
+        st.subheader("Statistical Tests")
+        stats_df = pd.DataFrame({
+            'Metric': ['Significance (p-value)', 'Confidence Interval (Lower)', 'Confidence Interval (Upper)'],
+            'Value': [
+                f"{results['statistical_tests'].get('p_value', 'N/A'):.3f}",
+                f"{results['statistical_tests'].get('ci_lower', 'N/A'):.3f}",
+                f"{results['statistical_tests'].get('ci_upper', 'N/A'):.3f}"
+            ]
+        })
+        st.dataframe(stats_df, hide_index=True)
+    
+    # Diagnostic Plots
+    if results.get('diagnostics'):
+        st.subheader("Diagnostic Plots")
+        # Add diagnostic plots here based on what's available in results
+        pass
+    
+    # Download Results
+    st.download_button(
+        label="Download Results CSV",
+        data=pd.DataFrame(results).to_csv(index=False),
+        file_name="nca_results.csv",
+        mime="text/csv"
+    )
+
 def render() -> None:
     """Render the analysis configuration page."""
     st.title("Analysis Configuration")
@@ -27,6 +124,15 @@ def render() -> None:
         st.error(message)
         if st.button("Go to Data Upload"):
             st.session_state.current_page = 'data_prep'
+            st.rerun()
+        return
+    
+    # Check if we have results to display
+    if 'analysis_results' in st.session_state and st.session_state.analysis_complete:
+        render_results(st.session_state.analysis_results)
+        if st.button("Configure New Analysis", type="secondary"):
+            st.session_state.analysis_complete = False
+            st.session_state.analysis_results = None
             st.rerun()
         return
     
@@ -290,10 +396,7 @@ def run_full_analysis() -> None:
             st.session_state.analysis_complete = True
             st.session_state.analysis_timestamp = pd.Timestamp.now()
             
-            # Update session state for navigation
-            st.session_state.current_page = 'results'
-            
-            # Force page rerun
+            # Force page rerun to show results
             st.rerun()
             
         except Exception as e:
